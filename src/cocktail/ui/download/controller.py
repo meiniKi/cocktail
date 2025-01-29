@@ -168,7 +168,11 @@ class ModelDownloadController(QtCore.QObject):
             f.write("\n\n## Version Description\n")
             f.write(model_version.description)
 
-        reply = self._download(model_file.url, final_path)
+        api_key = ""
+        if (k := os.environ.get('CIVITAI_API_KEY', None)) is not None:
+            api_key = f"?token={k}"
+
+        reply = self._download(model_file.url + api_key, final_path)
 
         widget = self.view.addDownload(model_file.name, reply)
         widget.requestOpenDirectory.connect(
