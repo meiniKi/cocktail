@@ -90,7 +90,16 @@ class ModelDownloadController(QtCore.QObject):
 
         filename = model_file.name
         root = self.settings.value("paths/root", os.path.expanduser("~"))
-        model_type_dir = self.settings.value(f"paths/{model.type}")
+
+        hier_structure = "/{}/{}/{}/{}".format(
+            model_version.base_model.replace(' ', '_'),
+            model.category.replace(' ', '_') + '_nsfw' if model.nsfw else '',
+            model.name.replace(' ', '_'),
+            model_version.name.replace(' ', '_')
+        )
+
+        model_type_dir = self.settings.value(f"paths/{model.type}")+hier_structure
+        os.makedirs(model_type_dir, exist_ok=True)
 
         if model_type_dir and os.path.isabs(model_type_dir):
             final_path = os.path.join(model_type_dir, filename)
@@ -128,14 +137,17 @@ class ModelDownloadController(QtCore.QObject):
         dirname, basename = os.path.split(final_path)
         filename, _ = os.path.splitext(basename)
 
-        image_path = os.path.join(dirname, f"{filename}.jpg")
-        image = self.get_image(model_version)
-        image_url = image.url if image else None
-
-        if image_url:
-            self._download(image_url, image_path)
+        image = None
+        for i, img in enumerate(self.get_image_list(model_version)):
+            if image is None:
+                image = img
+            image_path = os.path.join(dirname, f"{filename}_{i}.jpg")
+            image_url = img.url if img else None
+            if image_url:
+                self._download(image_url, image_path)
 
         json_path = os.path.join(dirname, f"{filename}.json")
+        info_path = os.path.join(dirname, f"{filename}.md")
 
         metadata = {
             "name": model.name,
@@ -148,6 +160,13 @@ class ModelDownloadController(QtCore.QObject):
 
         with open(json_path, "w") as f:
             json.dump(metadata, f, indent=4)
+
+        with open(info_path, "w") as f:
+            f.write(f"# {model.name}: {model_version.name}\n\n")
+            f.write("## Model Description\n")
+            f.write(model.description)
+            f.write("\n\n## Version Description\n")
+            f.write(model_version.description)
 
         reply = self._download(model_file.url, final_path)
 
@@ -174,6 +193,28 @@ class ModelDownloadController(QtCore.QObject):
 
         query.next()
         return data_classes.ModelImage.from_record(query.record())
+
+
+    def get_image_list(self, model_version: data_classes.ModelVersion):
+        query = QtSql.QSqlQuery(self.db_connection)
+        query.prepare(
+            """
+            SELECT * FROM model_image
+            WHERE model_version_id = :model_version_id
+            ORDER BY id DESC
+            """
+        )
+        query.bindValue(":model_version_id", model_version.id)
+
+        if not query.exec():
+            raise RuntimeError(
+                f"Failed to execute query: {query.lastError().text()}, {query.lastQuery()}"
+            )
+
+        images = []
+        while query.next():
+            images.append(data_classes.ModelImage.from_record(query.record()))
+        return images
 
     def _download(self, url, path):
         temp_path = path + ".part"
